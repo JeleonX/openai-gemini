@@ -66,12 +66,17 @@ which is necessary for continuous integration (CI).
 - _Worker_ [limits](https://developers.cloudflare.com/workers/platform/limits/#worker-limits)
 
 #### As a Cloudflare Pages Project
-1. Fork this repository and connect it in the Cloudflare Pages dashboard (`Connect to Git`).
-2. In the **Build settings**, configure:
+
+1- Fork this repository and connect it in the Cloudflare Pages dashboard (`Connect to Git`).
+
+In the **Build settings**, configure:
    - **Framework preset**: `None`
    - **Build command**: `npm run build`
    - **Build output directory**: `public`
-3. In **Settings -> Functions -> Compatibility flags**, add the flag: `nodejs_compat`.
+
+2- or src/worker.mjs - _worker.js - _worker.zip - upload to pages
+
+3- In **Settings -> Functions -> Compatibility flags**, add the flag: `nodejs_compat`.
 
 
 ### Deploy to Deno
