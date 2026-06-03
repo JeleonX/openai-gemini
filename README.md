@@ -56,6 +56,7 @@ which is necessary for continuous integration (CI).
 
 ### Deploy to Cloudflare
 
+#### As a Worker
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PublicAffairs/openai-gemini)
 - Alternatively can be deployed manually pasting content of [`src/worker.mjs`](src/worker.mjs)
   to https://workers.cloudflare.com/playground (see there `Deploy` button).
@@ -63,6 +64,14 @@ which is necessary for continuous integration (CI).
   `wrangler deploy`
 - Serve locally: `wrangler dev`
 - _Worker_ [limits](https://developers.cloudflare.com/workers/platform/limits/#worker-limits)
+
+#### As a Cloudflare Pages Project
+1. Fork this repository and connect it in the Cloudflare Pages dashboard (`Connect to Git`).
+2. In the **Build settings**, configure:
+   - **Framework preset**: `None`
+   - **Build command**: `npm run build`
+   - **Build output directory**: `public`
+3. In **Settings -> Functions -> Compatibility flags**, add the flag: `nodejs_compat`.
 
 
 ### Deploy to Deno
@@ -107,6 +116,32 @@ _..or_:
 ```sh
 OPENAI_API_BASE="https://my-super-proxy.vercel.app/v1"
 ```
+
+
+## Load Balancing and Failover (Multiple API Keys)
+
+To avoid rate limits (e.g., `429 Too Many Requests`) or handle quota exhaustion, you can configure multiple Gemini API keys. The proxy will automatically shuffle them for load balancing and retry seamlessly with the next key if an error (403, 429, 500, or 503) occurs.
+
+### 1. Environment Variable Mapping (Recommended)
+
+Set an environment variable named `API_KEY_MAP` containing a JSON object that maps a custom "proxy key" to an array of real Gemini keys.
+
+```json
+{
+  "my_custom_password": ["AIzaSy...", "AIzaTa...", "AIzaSb..."]
+}
+```
+
+In your client software, simply enter `my_custom_password` as the API key.
+
+### 2. Comma-separated Input
+
+Alternatively, you can provide multiple keys directly in your client software by separating them with commas:
+```text
+AIzaSy...,AIzaTa...,AIzaSb...
+```
+
+*Note: If no multiple keys are configured, the proxy defaults to the standard single-key forwarding without overhead.*
 
 
 ## Models
