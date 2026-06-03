@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 export default {
-  async fetch (request) {
+  async fetch (request, env) {
     if (request.method === "OPTIONS") {
       return handleOPTIONS();
     }
@@ -11,7 +11,8 @@ export default {
     };
     try {
       const auth = request.headers.get("Authorization");
-      const apiKey = auth?.split(" ")[1];
+      const rawApiKey = auth?.split(" ")[1];
+      const apiKeys = resolveApiKeys(rawApiKey, env);
       const assert = (success) => {
         if (!success) {
           throw new HttpError("The specified HTTP method is not allowed for the requested resource", 400);
@@ -21,15 +22,15 @@ export default {
       switch (true) {
         case pathname.endsWith("/chat/completions"):
           assert(request.method === "POST");
-          return handleCompletions(await request.json(), apiKey)
+          return handleCompletions(await request.json(), apiKeys)
             .catch(errHandler);
         case pathname.endsWith("/embeddings"):
           assert(request.method === "POST");
-          return handleEmbeddings(await request.json(), apiKey)
+          return handleEmbeddings(await request.json(), apiKeys)
             .catch(errHandler);
         case pathname.endsWith("/models"):
           assert(request.method === "GET");
-          return handleModels(apiKey)
+          return handleModels(apiKeys)
             .catch(errHandler);
         default:
           throw new HttpError("404 Not Found", 404);
@@ -75,10 +76,54 @@ const makeHeaders = (apiKey, more) => ({
   ...more
 });
 
-async function handleModels (apiKey) {
-  const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
-    headers: makeHeaders(apiKey),
-  });
+const getEnv = (env, key) => env?.[key] || (typeof process !== "undefined" ? process?.env?.[key] : undefined) || (typeof Deno !== "undefined" ? Deno?.env?.get?.(key) : undefined);
+
+const resolveApiKeys = (apiKey, env) => {
+  if (!apiKey) return [];
+  let keys = [apiKey];
+  const apiKeyMapStr = getEnv(env, "API_KEY_MAP");
+  if (apiKeyMapStr) {
+    try {
+      const apiKeyMap = JSON.parse(apiKeyMapStr);
+      if (apiKeyMap[apiKey]) {
+        keys = Array.isArray(apiKeyMap[apiKey]) ? apiKeyMap[apiKey] : apiKeyMap[apiKey].split(",");
+      }
+    } catch (e) {
+      console.error("Invalid API_KEY_MAP JSON");
+    }
+  }
+  if (keys.length === 1 && keys[0].includes(",")) {
+    keys = keys[0].split(",");
+  }
+  keys = keys.map(k => k.trim()).filter(Boolean);
+  
+  for (let i = keys.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+  }
+  return keys.length ? keys : [apiKey];
+};
+
+async function fetchWithRetry(url, optionsInit, apiKeys) {
+  let lastResponse;
+  for (const key of apiKeys) {
+    const options = { ...optionsInit };
+    options.headers = makeHeaders(key, optionsInit.headers);
+    const response = await fetch(url, options);
+    if (response.ok) {
+      return response;
+    }
+    if (![403, 429, 500, 503].includes(response.status)) {
+       return response;
+    }
+    console.warn(`API key failed with status ${response.status}. Retrying next key...`);
+    lastResponse = response;
+  }
+  return lastResponse;
+}
+
+async function handleModels (apiKeys) {
+  const response = await fetchWithRetry(`${BASE_URL}/${API_VERSION}/models`, {}, apiKeys);
   let { body } = response;
   if (response.ok) {
     const { models } = JSON.parse(await response.text());
@@ -96,7 +141,7 @@ async function handleModels (apiKey) {
 }
 
 const DEFAULT_EMBEDDINGS_MODEL = "gemini-embedding-001";
-async function handleEmbeddings (req, apiKey) {
+async function handleEmbeddings (req, apiKeys) {
   let modelFull, model;
   switch (true) {
     case typeof req.model !== "string":
@@ -115,9 +160,9 @@ async function handleEmbeddings (req, apiKey) {
   if (!Array.isArray(req.input)) {
     req.input = [ req.input ];
   }
-  const response = await fetch(`${BASE_URL}/${API_VERSION}/${modelFull}:batchEmbedContents`, {
+  const response = await fetchWithRetry(`${BASE_URL}/${API_VERSION}/${modelFull}:batchEmbedContents`, {
     method: "POST",
-    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       "requests": req.input.map(text => ({
         model: modelFull,
@@ -143,7 +188,7 @@ async function handleEmbeddings (req, apiKey) {
 }
 
 const DEFAULT_MODEL = "gemini-flash-latest";
-async function handleCompletions (req, apiKey) {
+async function handleCompletions (req, apiKeys) {
   let model;
   switch (true) {
     case typeof req.model !== "string":
@@ -181,11 +226,11 @@ async function handleCompletions (req, apiKey) {
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
   let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
   if (req.stream) { url += "?alt=sse"; }
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: "POST",
-    headers: makeHeaders(apiKey, { "Content-Type": "application/json" }),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }, apiKeys);
 
   body = response.body;
   if (response.ok) {
