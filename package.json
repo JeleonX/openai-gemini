@@ -6,6 +6,7 @@
     "nodemon": "3"
   },
   "scripts": {
+    "build": "mkdir -p public && cp src/worker.mjs public/_worker.js",
     "start": "node node.mjs",
     "dev": "nodemon --watch node.mjs --watch src/*.mjs node.mjs",
     "start:deno": "deno --allow-env --allow-net deno.mjs",
